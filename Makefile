@@ -12,7 +12,7 @@ CXXFLAGS = -std=c++20 -O3 -g -march=native
 cdbtreesearchnosoft: main.cpp
 	g++ $(CXXFLAGS) -I$(CDBDIRECTROOT) -o cdbtreesearchnosoft main.cpp $(LDFLAGS) $(LIBS)
 
-cdbtreesearch: main.cpp
+cdbtreesearch: softmax.cpp
 	g++ $(CXXFLAGS) -I$(CDBDIRECTROOT) -o cdbtreesearch softmax.cpp $(LDFLAGS) $(LIBS)
 
 clean:
