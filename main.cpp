@@ -250,6 +250,9 @@ int main(int argc, char const *argv[]) {
   if (find_argument(args, pos, "--fen"))
     fen = {*std::next(pos)};
 
+  if (fen == "startpos")
+    fen = constants::STARTPOS;
+
   // (initial) depth for searches
   int depth = 0;
   if (find_argument(args, pos, "--depth"))
@@ -274,7 +277,7 @@ int main(int argc, char const *argv[]) {
   Board board(fen);
 
   std::cout << "Opening DB" << std::endl;
-  std::uintptr_t handle = cdbdirect_initialize("/mnt/ssd/chess-20240814/data");
+  std::uintptr_t handle = cdbdirect_initialize(CHESSDB_PATH);
 
   Stats stats;
   if (do_pvsearch) {
