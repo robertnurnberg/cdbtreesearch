@@ -20,4 +20,4 @@ clean:
 	rm -f cdbtreesearch cdbtreesearchnosoft
 
 format:
-	clang-format -i main.cpp
+	clang-format -i main.cpp softmax.cpp
