@@ -545,20 +545,25 @@ int main(int argc, char const *argv[]) {
     bool deriv = true;
     fen_map_t fen_map;
     search_result_t sr;
+    fen_map_t *local_fens_with_unseen = uncover ? new fen_map_t : NULL;
 
     if (exact) {
       sr = softmax(board, depth, base, deriv, fen_map, stats, alpha, handle,
-                   showTree, fens_with_unseen);
+                   showTree, local_fens_with_unseen);
     } else {
       sr = cdbsoftmax(board, base, budget, fen_map, stats, alpha, handle,
-                      showTree, fens_with_unseen);
+                      showTree, local_fens_with_unseen);
     };
     std::cout << " score " << std::fixed << std::setw(8) << std::setprecision(2)
               << sr.first;
     std::cout << " unknown " << std::setw(10) << fen_map.size();
-    if (fens_with_unseen)
+    if (local_fens_with_unseen) {
       std::cout << " fens w/ unseen " << std::setw(10)
-                << fens_with_unseen->size();
+                << local_fens_with_unseen->size();
+      for (const auto &pair : *local_fens_with_unseen)
+        (*fens_with_unseen)[pair.first] = pair.second;
+      delete local_fens_with_unseen;
+    }
     std::cout << " hits    " << std::setw(10) << stats.hits;
     std::cout << " max_ply " << std::setw(10) << stats.max_ply << std::endl;
 
