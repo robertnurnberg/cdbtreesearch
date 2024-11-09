@@ -121,7 +121,7 @@ search_result_t gameOver(Board &board, int depth) {
 
 int count_unseen_moves(Board &board,
                        std::vector<std::pair<std::string, int>> &result,
-                       const std::uintptr_t handle, Stats &stats) {
+                       const std::uintptr_t handle) {
   int count_unseen = 0;
   Movelist moves;
   movegen::legalmoves(moves, board);
@@ -140,7 +140,6 @@ int count_unseen_moves(Board &board,
     if (it == result.end()) {
       board.makeMove<true>(m);
       auto r = cdbdirect_get(handle, board.getFen(false));
-      stats.gets++;
       if (r.back().second != -2)
         count_unseen++;
       board.unmakeMove(m);
@@ -186,7 +185,7 @@ search_result_t softmax(Board &board, int depth, double base, bool deriv,
   stats.hits++;
 
   if (fens_with_unseen) {
-    int count_unseen = count_unseen_moves(board, result, handle, stats);
+    int count_unseen = count_unseen_moves(board, result, handle);
     if (count_unseen) {
       PackedBoard pbfen = Board::Compact::encode(board);
       fens_with_unseen->lazy_emplace_l(
@@ -319,7 +318,7 @@ search_result_t cdbsoftmax(Board &board, double base, size_t budget,
   stats.hits++;
 
   if (fens_with_unseen) {
-    int count_unseen = count_unseen_moves(board, result, handle, stats);
+    int count_unseen = count_unseen_moves(board, result, handle);
     if (count_unseen) {
       PackedBoard pbfen = Board::Compact::encode(board);
       fens_with_unseen->lazy_emplace_l(
