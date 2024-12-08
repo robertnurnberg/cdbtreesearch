@@ -402,7 +402,7 @@ int main(int argc, char const *argv[]) {
     fen = {*std::next(pos)};
 
   if (fen == "startpos")
-    fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -";
+    fen = constants::STARTPOS;
 
   std::vector<std::string> inputFens;
 
@@ -441,7 +441,7 @@ int main(int argc, char const *argv[]) {
   bool allmoves = find_argument(args, pos, "--moves", true);
 
   std::cout << "Opening DB" << std::endl;
-  std::uintptr_t handle = cdbdirect_initialize("/mnt/ssd/chess-20240814/data");
+  std::uintptr_t handle = cdbdirect_initialize(CHESSDB_PATH);
 
   Stats stats;
 
