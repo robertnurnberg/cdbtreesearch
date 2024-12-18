@@ -37,6 +37,14 @@ using fen_map_t = phmap::parallel_flat_hash_map<
     PackedBoard, double, std::hash<PackedBoard>, std::equal_to<PackedBoard>,
     std::allocator<std::pair<PackedBoard, double>>, 8, std::mutex>;
 
+// store count of unseen moves, position's eval and eval gap to best unseen move
+using unseen_map_t = phmap::parallel_flat_hash_map<
+    PackedBoard, std::tuple<std::uint8_t, std::int16_t, int>,
+    std::hash<PackedBoard>, std::equal_to<PackedBoard>,
+    std::allocator<
+        std::pair<PackedBoard, std::tuple<std::uint8_t, std::int16_t, int>>>,
+    8, std::mutex>;
+
 // get memory in MB
 std::pair<size_t, size_t> get_memory() {
   size_t tSize = 0, resident = 0, share = 0;
@@ -119,10 +127,20 @@ search_result_t gameOver(Board &board, int depth) {
   return std::make_pair(double(0), -1);
 }
 
-int count_unseen_moves(Board &board,
-                       std::vector<std::pair<std::string, int>> &result,
-                       const std::uintptr_t handle) {
-  int count_unseen = 0;
+int get_eval_gap(int pos_eval, int child_move_eval) {
+  // correctly deal with back propagation of mate and TB win scores
+  if (child_move_eval >= 15000)
+    return -child_move_eval - pos_eval + 1;
+  if (child_move_eval <= -15000)
+    return -child_move_eval - pos_eval - 1;
+  return -child_move_eval - pos_eval;
+}
+
+std::tuple<std::uint8_t, std::int16_t, int>
+count_unseen_moves(Board &board,
+                   std::vector<std::pair<std::string, int>> &result,
+                   const std::uintptr_t handle) {
+  std::tuple<std::uint8_t, std::int16_t, int> count_unseen = {0, 0, 0};
   Movelist moves;
   movegen::legalmoves(moves, board);
 
@@ -140,8 +158,18 @@ int count_unseen_moves(Board &board,
     if (it == result.end()) {
       board.makeMove<true>(m);
       auto r = cdbdirect_get(handle, board.getFen(false));
-      if (r.back().second != -2)
-        count_unseen++;
+      if (r.back().second != -2) {
+        if (std::get<0>(count_unseen) == 0) {
+          std::get<1>(count_unseen) = result.front().second;
+          std::get<2>(count_unseen) =
+              get_eval_gap(result.front().second, r.front().second);
+        } else {
+          std::get<2>(count_unseen) =
+              std::max(std::get<2>(count_unseen),
+                       get_eval_gap(result.front().second, r.front().second));
+        }
+        std::get<0>(count_unseen) += 1;
+      }
       board.unmakeMove(m);
       unscored_checked++;
     }
@@ -152,7 +180,7 @@ int count_unseen_moves(Board &board,
 search_result_t softmax(Board &board, int depth, double base, bool deriv,
                         fen_map_t &fen_map, Stats &stats, const double alpha,
                         const std::uintptr_t handle, const bool showTree,
-                        fen_map_t *fens_with_unseen) {
+                        unseen_map_t *fens_with_unseen) {
 
   stats.nodes++;
   search_result_t ret = gameOver(board, depth);
@@ -185,12 +213,12 @@ search_result_t softmax(Board &board, int depth, double base, bool deriv,
   stats.hits++;
 
   if (fens_with_unseen) {
-    int count_unseen = count_unseen_moves(board, result, handle);
-    if (count_unseen) {
+    auto count_unseen = count_unseen_moves(board, result, handle);
+    if (std::get<0>(count_unseen)) {
       PackedBoard pbfen = Board::Compact::encode(board);
       fens_with_unseen->lazy_emplace_l(
-          std::move(pbfen), [](fen_map_t::value_type &p) {},
-          [&pbfen, &count_unseen](const fen_map_t::constructor &ctor) {
+          std::move(pbfen), [](unseen_map_t::value_type &p) {},
+          [&pbfen, &count_unseen](const unseen_map_t::constructor &ctor) {
             ctor(std::move(pbfen), count_unseen);
           });
     }
@@ -282,7 +310,7 @@ std::array<ThreadPool, 8> threadpools{};
 search_result_t cdbsoftmax(Board &board, double base, size_t budget,
                            fen_map_t &fen_map, Stats &stats, const double alpha,
                            const std::uintptr_t handle, const bool showTree,
-                           fen_map_t *fens_with_unseen) {
+                           unseen_map_t *fens_with_unseen) {
 
   stats.nodes++;
   size_t ply =
@@ -318,12 +346,12 @@ search_result_t cdbsoftmax(Board &board, double base, size_t budget,
   stats.hits++;
 
   if (fens_with_unseen) {
-    int count_unseen = count_unseen_moves(board, result, handle);
-    if (count_unseen) {
+    auto count_unseen = count_unseen_moves(board, result, handle);
+    if (std::get<0>(count_unseen)) {
       PackedBoard pbfen = Board::Compact::encode(board);
       fens_with_unseen->lazy_emplace_l(
-          std::move(pbfen), [](fen_map_t::value_type &p) {},
-          [&pbfen, &count_unseen](const fen_map_t::constructor &ctor) {
+          std::move(pbfen), [](unseen_map_t::value_type &p) {},
+          [&pbfen, &count_unseen](const unseen_map_t::constructor &ctor) {
             ctor(std::move(pbfen), count_unseen);
           });
     }
@@ -446,11 +474,19 @@ search_result_t cdbsoftmax(Board &board, double base, size_t budget,
   return std::make_pair(softmaxvalue, 0);
 }
 
-inline size_t sumValues(const fen_map_t &map) {
+inline size_t count_unseen_edges(const unseen_map_t &map) {
   size_t sum = 0;
   for (const auto &pair : map)
-    sum += pair.second;
+    sum += std::get<0>(pair.second);
   return sum;
+}
+
+inline size_t count_unseen_improved(const unseen_map_t &map) {
+  size_t count = 0;
+  for (const auto &pair : map)
+    if (std::get<2>(pair.second) > 0)
+      count++;
+  return count;
 }
 
 int main(int argc, char const *argv[]) {
@@ -503,7 +539,7 @@ int main(int argc, char const *argv[]) {
   bool exact = find_argument(args, pos, "--exact", true);
   bool allmoves = find_argument(args, pos, "--moves", true);
   bool uncover = find_argument(args, pos, "--findUnseenEdges", true);
-  fen_map_t *fens_with_unseen = uncover ? new fen_map_t : NULL;
+  unseen_map_t *fens_with_unseen = uncover ? new unseen_map_t : NULL;
 
   std::cout << "Opening DB" << std::endl;
   std::uintptr_t handle = cdbdirect_initialize(CHESSDB_PATH);
@@ -545,7 +581,7 @@ int main(int argc, char const *argv[]) {
     bool deriv = true;
     fen_map_t fen_map;
     search_result_t sr;
-    fen_map_t *local_fens_with_unseen = uncover ? new fen_map_t : NULL;
+    unseen_map_t *local_fens_with_unseen = uncover ? new unseen_map_t : NULL;
 
     if (exact) {
       sr = softmax(board, depth, base, deriv, fen_map, stats, alpha, handle,
@@ -594,12 +630,24 @@ int main(int argc, char const *argv[]) {
     for (const auto &pair : *fens_with_unseen) {
       auto board = Board::Compact::decode(pair.first);
       std::string fen = board.getFen(false);
-      ufile << fen << " c0 \"unseen moves: " << pair.second << "\";\n";
+      std::stringstream ss;
+      ss << fen
+         << " c0 \"unseen moves: " << static_cast<int>(std::get<0>(pair.second))
+         << ", eval (gap): " << std::get<1>(pair.second) << " (" << std::showpos
+         << std::get<2>(pair.second) << ")\";\n";
+      ufile << ss.str();
     }
     ufile.close();
     std::cout << "Saved " << fens_with_unseen->size()
-              << " positions with a total of " << sumValues(*fens_with_unseen)
+              << " positions with a total of "
+              << count_unseen_edges(*fens_with_unseen)
               << " unseen edges in unseen.epd." << std::endl;
+    auto improved = count_unseen_improved(*fens_with_unseen);
+    if (improved)
+      std::cout
+          << "For " << improved
+          << " of these positions, an unseen edge would be a new best move."
+          << std::endl;
   }
 
   std::cout << "Closing DB" << std::endl;
